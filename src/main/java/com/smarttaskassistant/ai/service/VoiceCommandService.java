@@ -21,7 +21,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @Service
-@Async
 @RequiredArgsConstructor
 @Slf4j
 public class VoiceCommandService {
@@ -99,13 +98,12 @@ public class VoiceCommandService {
     /**
      * Process voice command asynchronously with notification support
      * @param voiceText The voice command text to process
+     * @param userId The user ID (captured from SecurityContext before async execution)
      */
     @Async("voiceCommandExecutor")
-    public void processVoiceCommandAsync(String voiceText) {
-        Long userId = SecurityUtils.getCurrentUserId().orElse(null);
-
+    public void processVoiceCommandAsync(String voiceText, Long userId) {
         if (userId == null) {
-            log.error("User is not found. Failed to process voice command {}", voiceText);
+            log.error("User ID is null. Failed to process voice command {}", voiceText);
             return;
         }
 
@@ -122,7 +120,7 @@ public class VoiceCommandService {
             }
 
             // Execute the parsed command
-            NotificationRequest notificationRequest = executeCommand(parsedCommand);
+            NotificationRequest notificationRequest = executeCommand(parsedCommand, userId);
 
             notificationService.handleNotification(notificationRequest, userId);
 
@@ -190,17 +188,17 @@ public class VoiceCommandService {
         }
     }
 
-    private NotificationRequest executeCommand(ParsedCommand command) {
+    private NotificationRequest executeCommand(ParsedCommand command, Long userId) {
         return switch (command.commandType()) {
-            case CREATE_TASK -> executeCreateTask(command);
-            case UPDATE_TASK -> executeUpdateTask(command);
-            case DELETE_TASK -> executeDeleteTask(command);
-            case MARK_COMPLETE -> executeMarkComplete(command);
+            case CREATE_TASK -> executeCreateTask(command, userId);
+            case UPDATE_TASK -> executeUpdateTask(command, userId);
+            case DELETE_TASK -> executeDeleteTask(command, userId);
+            case MARK_COMPLETE -> executeMarkComplete(command, userId);
             case UNKNOWN -> NotificationRequest.error("Unknown command", command.reasoning());
         };
     }
 
-    private NotificationRequest executeCreateTask(ParsedCommand command) {
+    private NotificationRequest executeCreateTask(ParsedCommand command, Long userId) {
         if (command.title() == null || command.title().trim().isEmpty()) {
             return NotificationRequest.error("Missing title", "Task title is required to create a task.");
         }
@@ -215,14 +213,14 @@ public class VoiceCommandService {
             command.status() != null ? command.status() : "TODO"
         );
 
-        TaskResponse task = taskService.createTask(request);
+        TaskResponse task = taskService.createTask(request, userId);
         return NotificationRequest.success(
                 "task created",
             "Task created successfully: " + task.title()
         );
     }
 
-    private NotificationRequest executeUpdateTask(ParsedCommand command) {
+    private NotificationRequest executeUpdateTask(ParsedCommand command, Long userId) {
         if (command.title() == null || command.title().trim().isEmpty()) {
             return NotificationRequest.error("Missing title", "Task title is required to update a task.");
         }
@@ -237,20 +235,20 @@ public class VoiceCommandService {
             command.status()
         );
 
-        TaskResponse task = taskService.updateTask(command.title(), request);
+        TaskResponse task = taskService.updateTask(command.title(), request, userId);
         return NotificationRequest.success(
                 "task updated",
             "Task updated successfully: " + task.title()
         );
     }
 
-    private NotificationRequest executeDeleteTask(ParsedCommand command) {
+    private NotificationRequest executeDeleteTask(ParsedCommand command, Long userId) {
         if (command.title() == null || command.title().trim().isEmpty()) {
             return NotificationRequest.error("Missing title", "Task title is required to delete a task.");
         }
 
         try {
-            taskService.deleteTaskByTitle(command.title());
+            taskService.deleteTaskByTitle(command.title(), userId);
             return NotificationRequest.success(
                     "task deleted",
                 "Task deleted successfully: " + command.title());
@@ -289,7 +287,7 @@ public class VoiceCommandService {
         }
     }*/
 
-    private NotificationRequest executeMarkComplete(ParsedCommand command) {
+    private NotificationRequest executeMarkComplete(ParsedCommand command, Long userId) {
         if (command.title() == null || command.title().trim().isEmpty()) {
             return NotificationRequest.error("Missing title", "Task title is required to update a task.");
         }
@@ -298,12 +296,12 @@ public class VoiceCommandService {
                 command.title(), null, null, null, null, null, "DONE"
         );
 
-        TaskResponse task = taskService.updateTask(command.title(), request);
+        TaskResponse task = taskService.updateTask(command.title(), request, userId);
         return NotificationRequest.success("task updated",
             "Task marked as completed: " + task.title());
     }
 
-    public VoiceCommandResponse listTasks(TaskStatus status) {
+    public VoiceCommandResponse listTasks(TaskStatus status, Long userId) {
         try {
             log.info("Generating daily summary");
             
@@ -323,7 +321,7 @@ public class VoiceCommandService {
                 null,
                 org.springframework.data.domain.Sort.by("severity").descending().and(
                     org.springframework.data.domain.Sort.by("createdAt").descending()
-                )
+                ), userId
             );
             
             // Separate scheduled and unscheduled tasks
@@ -387,12 +385,10 @@ public class VoiceCommandService {
         
         String userPrompt = taskInfo.toString();
         
-        String aiResponse = chatClient.prompt()
+        return chatClient.prompt()
             .system(SYSTEM_PROMPT_FOR_DAILY_SUMMARY)
             .user(userPrompt)
             .call()
             .content();
-            
-        return aiResponse;
     }
 }

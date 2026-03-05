@@ -3,6 +3,7 @@ package com.smarttaskassistant.ai.controller;
 import com.smarttaskassistant.ai.model.VoiceCommandRequest;
 import com.smarttaskassistant.ai.model.VoiceCommandResponse;
 import com.smarttaskassistant.ai.service.VoiceCommandService;
+import com.smarttaskassistant.auth.util.SecurityUtils;
 import com.smarttaskassistant.task.model.TaskStatus;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +27,11 @@ public class VoiceCommandController {
         
         log.info("Received voice command request: {}", request.voiceText());
         
-        voiceCommandService.processVoiceCommandAsync(request.voiceText());
+        // Get userId from SecurityContext before async execution
+        Long userId = SecurityUtils.getCurrentUserId()
+                .orElseThrow(() -> new IllegalStateException("User not authenticated"));
+        
+        voiceCommandService.processVoiceCommandAsync(request.voiceText(), userId);
 
         VoiceCommandResponse immediateResponse = VoiceCommandResponse.success(
                 "Voice command processing started. You will receive a notification when complete."
@@ -38,8 +43,12 @@ public class VoiceCommandController {
     @GetMapping("/daily-summary")
     public ResponseEntity<VoiceCommandResponse> getDailySummary() {
         log.info("Generating daily summary");
+
+        // Get userId from SecurityContext before async execution
+        Long userId = SecurityUtils.getCurrentUserId()
+                .orElseThrow(() -> new IllegalStateException("User not authenticated"));
         
-        VoiceCommandResponse response = voiceCommandService.listTasks(TaskStatus.TODO);
+        VoiceCommandResponse response = voiceCommandService.listTasks(TaskStatus.TODO, userId);
         
         if (response.success()) {
             return ResponseEntity.ok(response);

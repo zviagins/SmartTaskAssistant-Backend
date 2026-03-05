@@ -54,30 +54,4 @@ public class AsyncConfig {
         
         return executor;
     }
-
-    /**
-     * Separate thread pool for notification operations
-     * Smaller pool since notifications are typically quick operations
-     */
-    @Bean("notificationExecutor")
-    public Executor notificationExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(50);
-        executor.setThreadNamePrefix("Notification-");
-        executor.setKeepAliveSeconds(30);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setAllowCoreThreadTimeOut(true);
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(15);
-        
-        executor.initialize();
-        
-        log.info("Notification async executor initialized with core={}, max={}, queue={}", 
-                executor.getCorePoolSize(), executor.getMaxPoolSize(), executor.getQueueCapacity());
-        
-        return executor;
-    }
 }

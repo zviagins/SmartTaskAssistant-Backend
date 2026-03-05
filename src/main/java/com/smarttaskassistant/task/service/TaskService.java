@@ -18,8 +18,12 @@ public class TaskService {
 
     private final TaskRepository repository;
 
-    public TaskResponse createTask(TaskCreateRequest task) {
+    public TaskResponse createTask(TaskCreateRequest task){
         Long userId = SecurityUtils.getCurrentUserId().orElseThrow(() -> new RuntimeException("Failed to get user from request"));
+        return createTask(task, userId);
+    }
+
+    public TaskResponse createTask(TaskCreateRequest task, Long userId) {
         TaskStatus status;
 
         try {
@@ -28,23 +32,20 @@ public class TaskService {
             status = TaskStatus.TODO;
         }
         Task newTask = repository.save(Task.builder()
-                        .title(task.title())
-                        .description(task.description())
-                        .dueTime(task.dueTime())
-                        .location(task.location())
-                        .reminder(task.reminder())
-                        .severity(task.severity())
-                        .status(status)
-                        .userId(userId)
+                .title(task.title())
+                .description(task.description())
+                .dueTime(task.dueTime())
+                .location(task.location())
+                .reminder(task.reminder())
+                .severity(task.severity())
+                .status(status)
+                .userId(userId)
                 .build());
 
         return TaskResponse.fromEntity(newTask);
     }
 
-    public TaskResponse updateTask(String title, TaskUpdateRequest request) {
-        Long userId = SecurityUtils.getCurrentUserId()
-                .orElseThrow(() -> new RuntimeException("Failed to get user from request"));
-
+    public TaskResponse updateTask(String title, TaskUpdateRequest request, Long userId) {
         Task task = repository.findByTitleContainingAndUserIdOrderByUpdatedAtDesc(title, userId)
                 .orElseThrow(() -> new RuntimeException("Task not found with title containing: " + title));
 
@@ -94,8 +95,16 @@ public class TaskService {
                                        LocalDateTime dueBefore,
                                        LocalDateTime dueAfter,
                                        Sort sort) {
-        Long userId = SecurityUtils.getCurrentUserId()
-                .orElseThrow(() -> new RuntimeException("No user found"));
+        Long userId = SecurityUtils.getCurrentUserId().orElseThrow(() -> new RuntimeException("No user found"));
+        return getTasks(status, severity, dueBefore, dueAfter, sort, userId);
+    }
+
+    public List<TaskResponse> getTasks(TaskStatus status,
+                                       Integer severity,
+                                       LocalDateTime dueBefore,
+                                       LocalDateTime dueAfter,
+                                       Sort sort,
+                                       Long userId) {
 
         Specification<Task> spec = Specification.allOf(
                 TaskSpecification.hasUserId(userId),
@@ -116,20 +125,14 @@ public class TaskService {
         repository.deleteByIdAndUserId(id, userId);
     }
 
-    public TaskResponse getTaskByTitle(String title) {
-        Long userId = SecurityUtils.getCurrentUserId()
-                .orElseThrow(() -> new RuntimeException("Failed to get user from request"));
-
-        Task task = repository.findByTitleContainingAndUserIdOrderByUpdatedAtDesc(title, userId)
-                .orElseThrow(() -> new RuntimeException("Task not found with title containing: " + title));
-
-        return TaskResponse.fromEntity(task);
-    }
-
     public void deleteTaskByTitle(String title) {
         Long userId = SecurityUtils.getCurrentUserId()
                 .orElseThrow(() -> new RuntimeException("Failed to get user from request"));
 
+        deleteTaskByTitle(title, userId);
+    }
+
+    public void deleteTaskByTitle(String title, Long userId) {
         Task task = repository.findByTitleContainingAndUserIdOrderByUpdatedAtDesc(title, userId)
                 .orElseThrow(() -> new RuntimeException("Task not found with title containing: " + title));
 
