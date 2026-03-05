@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+            http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.22.xsd">
+
+    <!-- USERS TABLE -->
+    <changeSet id="1-create-users" author="ira">
+        <createTable tableName="users">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="email" type="VARCHAR(255)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+            <column name="password_hash" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="full_name" type="VARCHAR(255)"/>
+            <column name="roles" type="VARCHAR(255)" defaultValue="USER"/>
+            <column name="email_verified" type="BOOLEAN" defaultValue="false"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <!-- EXTERNAL ACCOUNTS TABLE -->
+    <changeSet id="2-create-external-accounts" author="ira">
+        <createTable tableName="external_accounts">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="fk_external_accounts_user"
+                             references="users(id)"/>
+            </column>
+            <column name="provider" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="external_user_id" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="refresh_token_encrypted" type="TEXT"/>
+            <column name="token_scopes" type="TEXT"/>
+            <column name="last_sync_at" type="TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <!-- TASKS TABLE -->
+    <changeSet id="3-create-tasks" author="ira">
+        <createTable tableName="tasks">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="fk_tasks_user"
+                             references="users(id)"/>
+            </column>
+            <column name="google_event_id" type="VARCHAR(255)"/>
+            <column name="title" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT"/>
+            <column name="due_time" type="TIMESTAMP"/>
+            <column name="location" type="VARCHAR(255)"/>
+            <column name="reminder" type="TIMESTAMP"/>
+            <column name="severity" type="INT"/>
+            <column name="status" type="VARCHAR(50)" defaultValue="NEW"/>
+            <column name="scheduled" type="BOOLEAN" defaultValue="false"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="4-change-to-name" author="irak">
+        <renameColumn tableName="users" oldColumnName="full_name" newColumnName="name"/>
+    </changeSet>
+
+</databaseChangeLog>
