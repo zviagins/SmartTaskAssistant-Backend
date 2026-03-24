@@ -4,14 +4,11 @@ import com.smarttaskassistant.ai.model.VoiceCommandRequest;
 import com.smarttaskassistant.ai.model.VoiceCommandResponse;
 import com.smarttaskassistant.ai.service.VoiceCommandService;
 import com.smarttaskassistant.auth.util.SecurityUtils;
-import com.smarttaskassistant.task.model.TaskStatus;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/voice")
@@ -48,7 +45,7 @@ public class VoiceCommandController {
         Long userId = SecurityUtils.getCurrentUserId()
                 .orElseThrow(() -> new IllegalStateException("User not authenticated"));
         
-        VoiceCommandResponse response = voiceCommandService.listTasks(TaskStatus.TODO, userId);
+        VoiceCommandResponse response = voiceCommandService.getDailySummary(userId);
         
         if (response.success()) {
             return ResponseEntity.ok(response);

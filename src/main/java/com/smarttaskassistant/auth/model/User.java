@@ -35,6 +35,7 @@ public class User {
 
     private Instant createdAt;
     private Instant updatedAt;
+    private Instant recentlyActiveAt;
 
     @PrePersist
     public void prePersist() {

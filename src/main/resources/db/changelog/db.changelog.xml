@@ -98,4 +98,10 @@
         </createTable>
     </changeSet>
 
+    <changeSet id="6-recently-active-at-to-user" author="irak">
+        <addColumn tableName="users">
+            <column name="recently_active_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

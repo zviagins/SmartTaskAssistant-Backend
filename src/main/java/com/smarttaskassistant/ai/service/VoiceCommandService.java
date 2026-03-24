@@ -1,24 +1,37 @@
 package com.smarttaskassistant.ai.service;
 
-import com.smarttaskassistant.ai.model.*;
+import com.smarttaskassistant.ai.model.ParsedCommand;
+import com.smarttaskassistant.ai.model.Summary;
+import com.smarttaskassistant.ai.model.VoiceCommandResponse;
+import com.smarttaskassistant.ai.repository.SummaryRepository;
 import com.smarttaskassistant.ai.util.JsonUtils;
+import com.smarttaskassistant.auth.model.User;
+import com.smarttaskassistant.auth.service.UserService;
 import com.smarttaskassistant.auth.util.SecurityUtils;
-import com.smarttaskassistant.notification.model.Notification;
 import com.smarttaskassistant.notification.model.NotificationRequest;
 import com.smarttaskassistant.notification.service.NotificationService;
-import com.smarttaskassistant.task.model.*;
+import com.smarttaskassistant.task.model.TaskCreateRequest;
+import com.smarttaskassistant.task.model.TaskResponse;
+import com.smarttaskassistant.task.model.TaskStatus;
+import com.smarttaskassistant.task.model.TaskUpdateRequest;
 import com.smarttaskassistant.task.service.TaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+
+import static com.smarttaskassistant.common.Constant.USER_DEFAULT_NAME;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +41,8 @@ public class VoiceCommandService {
     private final TaskService taskService;
     private final ChatClient chatClient;
     private final NotificationService notificationService;
+    private final SummaryRepository summaryRepository;
+    private final UserService userService;
 
     private static final String SYSTEM_PROMPT = """
             You are an AI assistant that helps users manage their tasks through voice commands. 
@@ -80,7 +95,7 @@ public class VoiceCommandService {
             """;
 
     private static final String SYSTEM_PROMPT_FOR_DAILY_SUMMARY = """
-            You are a personal assistant that creates daily task summaries. Create a natural, conversational message that helps the user understand their day ahead.
+            You are a personal assistant that creates daily task summaries. Create a natural, conversational message that helps the user understand their day ahead. Do not end with question.
             
             Guidelines:
             - Use the user's name naturally
@@ -301,58 +316,114 @@ public class VoiceCommandService {
             "Task marked as completed: " + task.title());
     }
 
-    public VoiceCommandResponse listTasks(TaskStatus status, Long userId) {
+    /**
+     * Returns the daily summary for the current user and calendar day. Uses MongoDB keyed by {@code userId_date}
+     * to avoid repeated LLM calls; the task list in the response is always loaded from the primary store.
+     */
+    public VoiceCommandResponse getDailySummary(Long userId) {
         try {
-            log.info("Generating daily summary");
-            
-            // Get current user's name
-            String userName = SecurityUtils.getCurrentUserName()
-                    .orElse("User");
-            
-            // Get today's date range
-            LocalDateTime startOfDay = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
-            LocalDateTime endOfDay = LocalDateTime.now().withHour(23).withMinute(59).withSecond(59).withNano(999999999);
-            
-            // Get all tasks by status
-            List<TaskResponse> allTodoTasks = taskService.getTasks(
-                status == null ? TaskStatus.TODO : status,
-                null, // any severity
-                null, // any due date
-                null,
-                org.springframework.data.domain.Sort.by("severity").descending().and(
-                    org.springframework.data.domain.Sort.by("createdAt").descending()
-                ), userId
-            );
-            
-            // Separate scheduled and unscheduled tasks
-            List<TaskResponse> scheduledTasks = allTodoTasks.stream()
-                .filter(task -> task.dueTime() != null && 
-                    task.dueTime().isAfter(startOfDay) && 
-                    task.dueTime().isBefore(endOfDay))
-                .sorted(Comparator.comparing(TaskResponse::dueTime))
-                .toList();
-                
-            List<TaskResponse> unscheduledTasks = allTodoTasks.stream()
-                .filter(task -> task.dueTime() == null)
-                .sorted((t1, t2) -> Integer.compare(t2.severity(), t1.severity())) // Higher severity first
-                .toList();
-            
-            // Generate personalized message using AI
-            String dailySummary = generateDailySummary(userName, scheduledTasks, unscheduledTasks);
-            
-            return VoiceCommandResponse.success(
-                dailySummary,
-                allTodoTasks
-            );
-            
+            LocalDate today = LocalDate.now();
+            String summaryId = Summary.compositeId(userId, today);
+            log.debug("Getting daily summary for {}", summaryId);
+
+            DailyTaskBundle bundle = loadDailyTaskBundle(userId, today);
+
+            String message = summaryRepository.findById(summaryId)
+                    .map(Summary::getContent)
+                    .orElseGet(() -> {
+                        String generated = generateDailySummary(
+                                bundle.userName(), bundle.scheduledTasks(), bundle.unscheduledTasks());
+                        persistSummary(userId, today, summaryId, generated);
+                        return generated;
+                    });
+
+            userService.updateRecentlyActiveUser(userId);
+            return VoiceCommandResponse.success(message, bundle.allTodoTasks());
         } catch (Exception e) {
             log.error("Error generating daily task summary", e);
             return VoiceCommandResponse.error("Sorry, I couldn't generate your daily summary. Please try again.");
         }
     }
+
+    /**
+     * Prefetches today's summary for a user if not already stored (scheduled job). Uses {@link User} name from DB.
+     */
+    public void prefetchDailySummaryForUser(Long userId, LocalDate forDate) {
+        String summaryId = Summary.compositeId(userId, forDate);
+        if (summaryRepository.findById(summaryId).isPresent()) {
+            log.debug("Prefetch skipped, summary already exists for {}", summaryId);
+            return;
+        }
+        String userName = userService.getById(userId)
+                .map(User::getName)
+                .filter(name -> !name.trim().isEmpty())
+                .orElse(USER_DEFAULT_NAME);
+        DailyTaskBundle bundle = loadDailyTaskBundle(userId, forDate, userName);
+        String generated = generateDailySummary(bundle.userName(), bundle.scheduledTasks(), bundle.unscheduledTasks());
+        persistSummary(userId, forDate, summaryId, generated);
+        log.info("Prefetched daily summary for userId={}, forDate={}", userId, forDate);
+    }
+
+    private void persistSummary(Long userId, LocalDate date, String summaryId, String content) {
+        Summary doc = new Summary(
+                summaryId,
+                userId,
+                date,
+                content,
+                false,
+                Instant.now());
+        try {
+            summaryRepository.save(doc);
+        } catch (DuplicateKeyException e) {
+            log.debug("Daily summary already persisted for id {} (concurrent request)", summaryId);
+        }
+    }
+
+    private DailyTaskBundle loadDailyTaskBundle(Long userId, LocalDate day) {
+        String userName = SecurityUtils.getCurrentUserName().orElse(USER_DEFAULT_NAME);
+        return loadDailyTaskBundle(userId, day, userName);
+    }
+
+    private DailyTaskBundle loadDailyTaskBundle(Long userId, LocalDate day, String userName) {
+        LocalDateTime startOfDay = day.atStartOfDay();
+        LocalDateTime endOfDay = day.atTime(LocalTime.MAX);
+
+        List<TaskResponse> allTodoTasks = taskService.getTasks(
+                TaskStatus.TODO,
+                null,
+                null,
+                null,
+                org.springframework.data.domain.Sort.by("severity").descending().and(
+                        org.springframework.data.domain.Sort.by("createdAt").descending()
+                ),
+                userId
+        );
+
+        List<TaskResponse> scheduledTasks = allTodoTasks.stream()
+                .filter(task -> task.dueTime() != null
+                        && task.dueTime().isAfter(startOfDay)
+                        && task.dueTime().isBefore(endOfDay))
+                .sorted(Comparator.comparing(TaskResponse::dueTime))
+                .toList();
+
+        List<TaskResponse> unscheduledTasks = allTodoTasks.stream()
+                .filter(task -> task.dueTime() == null)
+                .sorted((t1, t2) -> Integer.compare(t2.severity(), t1.severity()))
+                .toList();
+
+        return new DailyTaskBundle(userName, allTodoTasks, scheduledTasks, unscheduledTasks);
+    }
+
+    private record DailyTaskBundle(
+            String userName,
+            List<TaskResponse> allTodoTasks,
+            List<TaskResponse> scheduledTasks,
+            List<TaskResponse> unscheduledTasks
+    ) {
+    }
     
     private String generateDailySummary(String userName, List<TaskResponse> scheduledTasks, List<TaskResponse> unscheduledTasks) {
-            
+        log.debug("Generating daily summary for user {}", userName);
         StringBuilder taskInfo = new StringBuilder();
         taskInfo.append("User: ").append(userName).append("\n\n");
         

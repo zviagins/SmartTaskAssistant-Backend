@@ -1,5 +1,6 @@
 package com.smarttaskassistant.task.service;
 
+import com.smarttaskassistant.auth.service.UserService;
 import com.smarttaskassistant.auth.util.SecurityUtils;
 import com.smarttaskassistant.task.model.*;
 import com.smarttaskassistant.task.repository.TaskRepository;
@@ -17,6 +18,7 @@ import java.util.List;
 public class TaskService {
 
     private final TaskRepository repository;
+    private final UserService userService;
 
     public TaskResponse createTask(TaskCreateRequest task){
         Long userId = SecurityUtils.getCurrentUserId().orElseThrow(() -> new RuntimeException("Failed to get user from request"));
@@ -42,6 +44,7 @@ public class TaskService {
                 .userId(userId)
                 .build());
 
+        userService.updateRecentlyActiveUser(userId);
         return TaskResponse.fromEntity(newTask);
     }
 
@@ -87,6 +90,7 @@ public class TaskService {
         }
 
         Task saved = repository.save(task);
+        userService.updateRecentlyActiveUser(task.getUserId());
         return TaskResponse.fromEntity(saved);
     }
 
@@ -123,6 +127,7 @@ public class TaskService {
         Long userId = SecurityUtils.getCurrentUserId()
                 .orElseThrow(() -> new RuntimeException("No user found"));
         repository.deleteByIdAndUserId(id, userId);
+        userService.updateRecentlyActiveUser(userId);
     }
 
     public void deleteTaskByTitle(String title) {
@@ -137,6 +142,7 @@ public class TaskService {
                 .orElseThrow(() -> new RuntimeException("Task not found with title containing: " + title));
 
         repository.deleteByIdAndUserId(task.getId(), userId);
+        userService.updateRecentlyActiveUser(userId);
     }
 }
 
