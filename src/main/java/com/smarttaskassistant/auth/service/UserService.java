@@ -2,7 +2,11 @@ package com.smarttaskassistant.auth.service;
 
 import com.smarttaskassistant.auth.model.User;
 import com.smarttaskassistant.auth.repository.UserRepository;
+import com.smarttaskassistant.task.event.TaskCreatedEvent;
+import com.smarttaskassistant.task.event.TaskDeletedEvent;
+import com.smarttaskassistant.task.event.TaskUpdatedEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,5 +32,23 @@ public class UserService {
 
     public Optional<User> getById(Long userId) {
         return userRepository.findById(userId);
+    }
+
+    @Transactional
+    @EventListener
+    public void onTaskCreated(TaskCreatedEvent event) {
+        updateRecentlyActiveUser(event.userId());
+    }
+
+    @Transactional
+    @EventListener
+    public void onTaskUpdated(TaskUpdatedEvent event) {
+        updateRecentlyActiveUser(event.userId());
+    }
+
+    @Transactional
+    @EventListener
+    public void onTaskDeleted(TaskDeletedEvent event) {
+        updateRecentlyActiveUser(event.userId());
     }
 }

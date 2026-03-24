@@ -4,8 +4,12 @@ import com.smarttaskassistant.auth.util.SecurityUtils;
 import com.smarttaskassistant.notification.model.Notification;
 import com.smarttaskassistant.notification.model.NotificationRequest;
 import com.smarttaskassistant.notification.repository.NotificationRepository;
+import com.smarttaskassistant.task.event.TaskCreatedEvent;
+import com.smarttaskassistant.task.event.TaskDeletedEvent;
+import com.smarttaskassistant.task.event.TaskUpdatedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -54,5 +58,29 @@ public class NotificationService {
         } catch (Exception e) {
             log.error("Failed to handle notification: {}", notificationRequest, e);
         }
+    }
+
+    @EventListener
+    public void onTaskCreated(TaskCreatedEvent event) {
+        handleNotification(NotificationRequest.success(
+                "task created",
+                "Task created: " + event.task().getTitle()
+        ), event.userId());
+    }
+
+    @EventListener
+    public void onTaskUpdated(TaskUpdatedEvent event) {
+        handleNotification(NotificationRequest.success(
+                "task updated",
+                "Task updated: " + event.task().getTitle()
+        ), event.userId());
+    }
+
+    @EventListener
+    public void onTaskDeleted(TaskDeletedEvent event) {
+        handleNotification(NotificationRequest.success(
+                "task deleted",
+                "Task deleted: " + event.title()
+        ), event.userId());
     }
 }

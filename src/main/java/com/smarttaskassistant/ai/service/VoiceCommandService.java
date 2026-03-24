@@ -1,5 +1,6 @@
 package com.smarttaskassistant.ai.service;
 
+import com.smarttaskassistant.ai.model.CommandType;
 import com.smarttaskassistant.ai.model.ParsedCommand;
 import com.smarttaskassistant.ai.model.Summary;
 import com.smarttaskassistant.ai.model.VoiceCommandResponse;
@@ -125,7 +126,7 @@ public class VoiceCommandService {
         try {
             String commandId = generateCommandId();
 
-            log.info("Starting async processing of voice command [{}]: {}", commandId, voiceText);
+            log.debug("Starting async processing of voice command [{}]: {}", commandId, voiceText);
 
             ParsedCommand parsedCommand = parseVoiceCommand(voiceText);
 
@@ -137,10 +138,11 @@ public class VoiceCommandService {
             // Execute the parsed command
             NotificationRequest notificationRequest = executeCommand(parsedCommand, userId);
 
-            notificationService.handleNotification(notificationRequest, userId);
+            if (notificationRequest != null) {
+                notificationService.handleNotification(notificationRequest, userId);
+            }
 
-            log.info("Completed async processing of voice command [{}]: {}",
-                    commandId, notificationRequest.notification());
+            log.debug("Completed async processing of voice commandId: {}", commandId);
 
         } catch (Exception e) {
             log.error("Error processing voice command: {}", voiceText, e);
@@ -204,20 +206,30 @@ public class VoiceCommandService {
     }
 
     private NotificationRequest executeCommand(ParsedCommand command, Long userId) {
-        return switch (command.commandType()) {
-            case CREATE_TASK -> executeCreateTask(command, userId);
-            case UPDATE_TASK -> executeUpdateTask(command, userId);
-            case DELETE_TASK -> executeDeleteTask(command, userId);
-            case MARK_COMPLETE -> executeMarkComplete(command, userId);
-            case UNKNOWN -> NotificationRequest.error("Unknown command", command.reasoning());
-        };
-    }
-
-    private NotificationRequest executeCreateTask(ParsedCommand command, Long userId) {
         if (command.title() == null || command.title().trim().isEmpty()) {
-            return NotificationRequest.error("Missing title", "Task title is required to create a task.");
+            return NotificationRequest.error("Missing title", "Task title is required.");
         }
 
+        if (command.commandType() == CommandType.UNKNOWN) {
+            return NotificationRequest.error("Unknown command", command.reasoning());
+        }
+
+        try {
+            switch (command.commandType()) {
+                case CREATE_TASK -> executeCreateTask(command, userId);
+                case UPDATE_TASK -> executeUpdateTask(command, userId);
+                case DELETE_TASK -> executeDeleteTask(command, userId);
+                case MARK_COMPLETE -> executeMarkComplete(command, userId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to execute command: {}", command, e);
+            return NotificationRequest.error("Failed to execute command", "Failed to execute command " + command.commandType().name());
+        }
+
+        return null;
+    }
+
+    private void executeCreateTask(ParsedCommand command, Long userId) {
         TaskCreateRequest request = new TaskCreateRequest(
             command.title(),
             command.description(),
@@ -228,18 +240,10 @@ public class VoiceCommandService {
             command.status() != null ? command.status() : "TODO"
         );
 
-        TaskResponse task = taskService.createTask(request, userId);
-        return NotificationRequest.success(
-                "task created",
-            "Task created successfully: " + task.title()
-        );
+        taskService.createTask(request, userId);
     }
 
-    private NotificationRequest executeUpdateTask(ParsedCommand command, Long userId) {
-        if (command.title() == null || command.title().trim().isEmpty()) {
-            return NotificationRequest.error("Missing title", "Task title is required to update a task.");
-        }
-
+    private void executeUpdateTask(ParsedCommand command, Long userId) {
         TaskUpdateRequest request = new TaskUpdateRequest(
             command.title(),
             command.description(),
@@ -250,26 +254,11 @@ public class VoiceCommandService {
             command.status()
         );
 
-        TaskResponse task = taskService.updateTask(command.title(), request, userId);
-        return NotificationRequest.success(
-                "task updated",
-            "Task updated successfully: " + task.title()
-        );
+        taskService.updateTask(command.title(), request, userId);
     }
 
-    private NotificationRequest executeDeleteTask(ParsedCommand command, Long userId) {
-        if (command.title() == null || command.title().trim().isEmpty()) {
-            return NotificationRequest.error("Missing title", "Task title is required to delete a task.");
-        }
-
-        try {
-            taskService.deleteTaskByTitle(command.title(), userId);
-            return NotificationRequest.success(
-                    "task deleted",
-                "Task deleted successfully: " + command.title());
-        } catch (RuntimeException e) {
-            return NotificationRequest.error("Failed to delete task", "Failed to delete task: " + e.getMessage());
-        }
+    private void executeDeleteTask(ParsedCommand command, Long userId) {
+        taskService.deleteTaskByTitle(command.title(), userId);
     }
 
     /*private VoiceCommandResponse executeListTasks(ParsedCommand command) {
@@ -302,18 +291,12 @@ public class VoiceCommandService {
         }
     }*/
 
-    private NotificationRequest executeMarkComplete(ParsedCommand command, Long userId) {
-        if (command.title() == null || command.title().trim().isEmpty()) {
-            return NotificationRequest.error("Missing title", "Task title is required to update a task.");
-        }
-
+    private void executeMarkComplete(ParsedCommand command, Long userId) {
         TaskUpdateRequest request = new TaskUpdateRequest(
                 command.title(), null, null, null, null, null, "DONE"
         );
 
-        TaskResponse task = taskService.updateTask(command.title(), request, userId);
-        return NotificationRequest.success("task updated",
-            "Task marked as completed: " + task.title());
+        taskService.updateTask(command.title(), request, userId);
     }
 
     /**

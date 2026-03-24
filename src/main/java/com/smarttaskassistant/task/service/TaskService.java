@@ -1,11 +1,14 @@
 package com.smarttaskassistant.task.service;
 
-import com.smarttaskassistant.auth.service.UserService;
 import com.smarttaskassistant.auth.util.SecurityUtils;
+import com.smarttaskassistant.task.event.TaskCreatedEvent;
+import com.smarttaskassistant.task.event.TaskDeletedEvent;
+import com.smarttaskassistant.task.event.TaskUpdatedEvent;
 import com.smarttaskassistant.task.model.*;
 import com.smarttaskassistant.task.repository.TaskRepository;
 import com.smarttaskassistant.task.spec.TaskSpecification;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -18,7 +21,7 @@ import java.util.List;
 public class TaskService {
 
     private final TaskRepository repository;
-    private final UserService userService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TaskResponse createTask(TaskCreateRequest task){
         Long userId = SecurityUtils.getCurrentUserId().orElseThrow(() -> new RuntimeException("Failed to get user from request"));
@@ -44,7 +47,7 @@ public class TaskService {
                 .userId(userId)
                 .build());
 
-        userService.updateRecentlyActiveUser(userId);
+        eventPublisher.publishEvent(new TaskCreatedEvent(userId, newTask));
         return TaskResponse.fromEntity(newTask);
     }
 
@@ -66,7 +69,6 @@ public class TaskService {
     }
 
     private TaskResponse updateTask(Task task, TaskUpdateRequest request) {
-
         if (request.title() != null && !request.title().isBlank()) {
             task.setTitle(request.title());
         }
@@ -90,7 +92,7 @@ public class TaskService {
         }
 
         Task saved = repository.save(task);
-        userService.updateRecentlyActiveUser(task.getUserId());
+        eventPublisher.publishEvent(new TaskUpdatedEvent(task.getUserId(), saved));
         return TaskResponse.fromEntity(saved);
     }
 
@@ -126,8 +128,10 @@ public class TaskService {
     public void deleteTask(Long id) {
         Long userId = SecurityUtils.getCurrentUserId()
                 .orElseThrow(() -> new RuntimeException("No user found"));
+        Task task = repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new RuntimeException("Task not found"));
         repository.deleteByIdAndUserId(id, userId);
-        userService.updateRecentlyActiveUser(userId);
+        eventPublisher.publishEvent(new TaskDeletedEvent(userId, task.getTitle(), task.getId()));
     }
 
     public void deleteTaskByTitle(String title) {
@@ -142,7 +146,7 @@ public class TaskService {
                 .orElseThrow(() -> new RuntimeException("Task not found with title containing: " + title));
 
         repository.deleteByIdAndUserId(task.getId(), userId);
-        userService.updateRecentlyActiveUser(userId);
+        eventPublisher.publishEvent(new TaskDeletedEvent(userId, task.getTitle(), task.getId()));
     }
 }
 
